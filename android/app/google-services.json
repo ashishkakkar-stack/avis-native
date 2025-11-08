@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "400845228789",
+    "project_id": "avis-b8d73",
+    "storage_bucket": "avis-b8d73.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:400845228789:android:d28875e2d90e01cb7e93bc",
+        "android_client_info": {
+          "package_name": "com.avis.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDsENoiQjGlMKvP6mkzs5fAZrd0BKfbhis"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

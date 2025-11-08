@@ -1,0 +1,9 @@
+{
+  "appId": "com.avis.app",
+  "appName": "AVIS",
+  "webDir": "public",
+  "server": {
+    "url": "https://avis-srs.lovable.app",
+    "cleartext": true
+  }
+}

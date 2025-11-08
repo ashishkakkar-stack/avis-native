@@ -1,0 +1,14 @@
+# Node modules
+node_modules/
+
+# Capacitor Android specific build artifacts
+android/build/
+android/.gradle/
+android/gradlew
+android/gradlew.bat
+
+# Other common build/temp files
+dist/
+.DS_Store
+*.log
+tmp/

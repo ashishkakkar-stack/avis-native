@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AVIS</string>
+    <string name="title_activity_main">AVIS</string>
+    <string name="package_name">com.avis.app</string>
+    <string name="custom_url_scheme">com.avis.app</string>
+</resources>
