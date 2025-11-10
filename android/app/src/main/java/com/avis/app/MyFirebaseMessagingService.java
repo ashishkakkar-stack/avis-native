@@ -1,5 +1,7 @@
 package com.avis.app;
 
+import android.app.ActivityManager;
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -17,7 +19,7 @@ import com.google.firebase.messaging.RemoteMessage;
 
 import org.json.JSONObject;
 
-import java.util.Map;
+import java.util.List;
 
 public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
@@ -147,7 +149,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         // ✅ Start playing custom sound (if not already playing)
         try {
-            playCustomSound(context);
+            playCustomSound();
         } catch (Exception e) {
             Log.e(TAG, "❌ Failed to play custom sound", e);
         }
@@ -268,6 +270,23 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         } catch (Exception e) {
             Log.e(TAG, "❌ Error preparing FCM sync", e);
         }
+    }
+
+    private boolean isAppInForeground(Context context) {
+        ActivityManager activityManager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        if (activityManager == null) return false;
+
+        List<ActivityManager.RunningAppProcessInfo> appProcesses = activityManager.getRunningAppProcesses();
+        if (appProcesses == null) return false;
+
+        final String packageName = context.getPackageName();
+        for (ActivityManager.RunningAppProcessInfo appProcess : appProcesses) {
+            if (appProcess.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+                    && appProcess.processName.equals(packageName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }
