@@ -21,11 +21,15 @@ import org.json.JSONObject;
 
 import java.util.List;
 
+import android.os.Handler;
+import android.os.Looper;
+
 public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
     private static final String TAG = "AVIS_FCM";
     private static MediaPlayer mediaPlayer;
     private static long lastSoundTime = 0; // Throttle audio replay
+    private static final String REFRESH_ACTION = "com.avis.app.REFRESH_WEBVIEW";
 
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
@@ -133,7 +137,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 .setContentIntent(fullScreenPendingIntent)
                 .setSound(null); // custom sound handled separately
 
-        notificationManager.notify((int) System.currentTimeMillis(), notificationBuilder.build());
+        // 🚀 Use a unique ID for each notification
+        int notificationId = (int) System.currentTimeMillis();
+        notificationManager.notify(notificationId, notificationBuilder.build());
 
         Log.d(TAG, "📲 Notification shown: " + title + " | " + messageBody);
 
@@ -142,15 +148,22 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         Log.d(TAG, "🧩 App foreground status: " + isForeground);
 
         if (!isForeground) {
-            // App in background or closed → bring to foreground and play sound
-            try {
-                context.startActivity(fullScreenIntent);
-                Log.d(TAG, "🚀 App brought to foreground automatically");
+            Log.d(TAG, "🚀 Attempting to bring app to foreground");
 
-                // Play ringtone
-                playCustomSound();
-            } catch (Exception e) {
-                Log.e(TAG, "❌ Failed to auto-launch MainActivity", e);
+            // Prevent duplicate launches — only start if activity really isn't running
+            if (!MainActivity.isActive()) {
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        context.startActivity(fullScreenIntent);
+                        Log.d(TAG, "✅ App brought to foreground after delay");
+                        playCustomSound();
+                    } catch (Exception e) {
+                        Log.e(TAG, "❌ Failed to auto-launch MainActivity", e);
+                    }
+                }, 800);
+            } else {
+                Log.d(TAG, "ℹ️ MainActivity already active, skipping relaunch");
+                playCustomSound(); // still play tone if backgrounded
             }
         } else {
             // App is already open → no need to launch or play sound
@@ -159,7 +172,8 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         // ✅ Regardless of state, refresh WebView
         try {
-            Intent refreshIntent = new Intent("com.avis.app.REFRESH_WEBVIEW");
+            Intent refreshIntent = new Intent(REFRESH_ACTION);
+            refreshIntent.setPackage(context.getPackageName());
             refreshIntent.putExtra("native_push_data", json.toString());
             context.sendBroadcast(refreshIntent);
             Log.d(TAG, "🔁 Sent broadcast to refresh WebView");
@@ -182,7 +196,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 mediaPlayer = null;
             }
 
-            Uri soundUri = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.a_old_telephone);
+            Uri soundUri = Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.doorbell_223669);
             mediaPlayer = MediaPlayer.create(this, soundUri);
 
             if (mediaPlayer != null) {
