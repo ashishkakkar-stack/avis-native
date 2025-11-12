@@ -103,7 +103,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             notificationManager.createNotificationChannel(channel);
         }
 
-        // ✅ Prepare intent to open MainActivity and include data for WebView reload
+        // ✅ Prepare intent for MainActivity (with WebView refresh data)
         JSONObject json = new JSONObject(remoteMessage.getData());
         Intent fullScreenIntent = new Intent(context, MainActivity.class);
         fullScreenIntent.putExtra("native_push_data", json.toString());
@@ -113,7 +113,6 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                         Intent.FLAG_ACTIVITY_SINGLE_TOP
         );
 
-        // ✅ PendingIntent for both full screen and notification tap
         PendingIntent fullScreenPendingIntent = PendingIntent.getActivity(
                 context,
                 0,
@@ -121,7 +120,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        // ✅ Build notification
+        // ✅ Build the notification
         NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(title != null ? title : "AVIS Alert")
@@ -132,29 +131,42 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setFullScreenIntent(fullScreenPendingIntent, true)
                 .setContentIntent(fullScreenPendingIntent)
-                .setSound(null); // Sound handled by MediaPlayer
+                .setSound(null); // custom sound handled separately
 
-        // ✅ Issue notification immediately
         notificationManager.notify((int) System.currentTimeMillis(), notificationBuilder.build());
 
         Log.d(TAG, "📲 Notification shown: " + title + " | " + messageBody);
 
-        // ✅ Auto-launch MainActivity if app is in background or closed
-        try {
-            context.startActivity(fullScreenIntent);
-            Log.d(TAG, "🚀 App brought to foreground automatically");
-        } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to auto-launch MainActivity", e);
+        // ✅ Check app state before auto-launch or playing sound
+        boolean isForeground = isAppInForeground(context);
+        Log.d(TAG, "🧩 App foreground status: " + isForeground);
+
+        if (!isForeground) {
+            // App in background or closed → bring to foreground and play sound
+            try {
+                context.startActivity(fullScreenIntent);
+                Log.d(TAG, "🚀 App brought to foreground automatically");
+
+                // Play ringtone
+                playCustomSound();
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Failed to auto-launch MainActivity", e);
+            }
+        } else {
+            // App is already open → no need to launch or play sound
+            Log.d(TAG, "🟢 App already in foreground — skipping sound and launch");
         }
 
-        // ✅ Start playing custom sound (if not already playing)
+        // ✅ Regardless of state, refresh WebView
         try {
-            playCustomSound();
+            Intent refreshIntent = new Intent("com.avis.app.REFRESH_WEBVIEW");
+            refreshIntent.putExtra("native_push_data", json.toString());
+            context.sendBroadcast(refreshIntent);
+            Log.d(TAG, "🔁 Sent broadcast to refresh WebView");
         } catch (Exception e) {
-            Log.e(TAG, "❌ Failed to play custom sound", e);
+            Log.e(TAG, "❌ Failed to send refresh broadcast", e);
         }
     }
-
 
     private void playCustomSound() {
         try {

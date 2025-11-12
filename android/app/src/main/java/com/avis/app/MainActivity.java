@@ -1,5 +1,6 @@
 package com.avis.app;
 
+import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,11 +20,18 @@ import androidx.work.WorkManager;
 
 import java.util.concurrent.TimeUnit;
 
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.content.Context;
+
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "AVIS_MAIN";
     private WebView webView;
     private static long lastReloadTime = 0; // Used for 5-second throttle
 
+    private BroadcastReceiver webViewRefreshReceiver;
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -37,6 +45,18 @@ public class MainActivity extends BridgeActivity {
                         Log.e("AVIS_MAIN", "⚠️ Unable to fetch FCM token at startup", task.getException());
                     }
                 });
+
+        // ✅ Register the WebView refresh broadcast receiver
+        IntentFilter filter = new IntentFilter("com.avis.app.REFRESH_WEBVIEW");
+
+        try {
+            // Use legacy 2-argument call to support all SDKs safely
+            registerReceiver(webViewRefreshReceiver, filter);
+            Log.d(TAG, "✅ WebView refresh receiver registered");
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error registering WebView refresh receiver", e);
+        }
+
 
         webView = (WebView) bridge.getWebView();
         webView.getSettings().setJavaScriptEnabled(true);
@@ -52,6 +72,24 @@ public class MainActivity extends BridgeActivity {
                 super.onPageFinished(view, url);
             }
         });
+
+        // ✅ Listen for broadcast from FCM service to refresh the WebView
+        webViewRefreshReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("com.avis.app.REFRESH_WEBVIEW".equals(intent.getAction())) {
+                    Log.d(TAG, "🔁 Refreshing WebView after FCM message");
+
+                    if (webView != null) {
+                        // Delay slightly to ensure content loads cleanly
+                        webView.postDelayed(() -> {
+                            webView.reload();
+                            Log.d(TAG, "✅ WebView reloaded");
+                        }, 1000);
+                    }
+                }
+            }
+        };
 
         // Schedule a daily background FCM sync
         PeriodicWorkRequest resyncWork = new PeriodicWorkRequest.Builder(
@@ -99,6 +137,15 @@ public class MainActivity extends BridgeActivity {
         }
 
         handleIntentPush(getIntent());
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (webViewRefreshReceiver != null) {
+            unregisterReceiver(webViewRefreshReceiver);
+            webViewRefreshReceiver = null;
+        }
     }
 
     /**
