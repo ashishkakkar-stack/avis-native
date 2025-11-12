@@ -24,6 +24,12 @@ import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
 import android.content.Context;
 
+import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.net.Uri;
+import android.content.ActivityNotFoundException;
+
+
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "AVIS_MAIN";
     private WebView webView;
@@ -64,6 +70,54 @@ public class MainActivity extends BridgeActivity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                String url = uri.toString();
+                Log.d(TAG, "🌐 Intercepted URL: " + url);
+
+                // Allow only your PWA domain inside WebView
+                if (url.contains("avis-srs.lovable.app")) {
+                    return false; // allow normal in-app navigation
+                }
+
+                // Handle special schemes
+                if (url.startsWith("tel:")) {
+                    Intent dialIntent = new Intent(Intent.ACTION_DIAL, uri);
+                    view.getContext().startActivity(dialIntent);
+                    return true;
+                }
+
+                if (url.startsWith("mailto:")) {
+                    Intent emailIntent = new Intent(Intent.ACTION_SENDTO, uri);
+                    view.getContext().startActivity(emailIntent);
+                    return true;
+                }
+
+                // Everything else: open externally
+                Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                try {
+                    // Try to open in native app (WhatsApp, dialer, etc.)
+                    view.getContext().startActivity(intent);
+                    Log.d(TAG, "✅ Opened external link in native app: " + url);
+                } catch (ActivityNotFoundException e) {
+                    // Fallback: open in default browser
+                    try {
+                        Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                        browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        view.getContext().startActivity(browserIntent);
+                        Log.d(TAG, "🌍 Opened link in system browser: " + url);
+                    } catch (Exception ex) {
+                        Log.e(TAG, "❌ Unable to open URL externally: " + url, ex);
+                    }
+                }
+
+                // Returning true prevents WebView from navigating away
+                return true;
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 Log.d(TAG, "✅ WebView loaded: " + url);
                 injectJwtReader(webView);
@@ -72,6 +126,7 @@ public class MainActivity extends BridgeActivity {
                 super.onPageFinished(view, url);
             }
         });
+
 
         // ✅ Listen for broadcast from FCM service to refresh the WebView
         webViewRefreshReceiver = new BroadcastReceiver() {
