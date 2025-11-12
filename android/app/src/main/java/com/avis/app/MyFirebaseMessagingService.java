@@ -109,8 +109,18 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
         // ✅ Prepare intent for MainActivity (with WebView refresh data)
         JSONObject json = new JSONObject(remoteMessage.getData());
+        String pushId = remoteMessage.getMessageId();
+        if ((pushId == null || pushId.isEmpty()) && remoteMessage.getData().containsKey("id")) {
+            pushId = remoteMessage.getData().get("id");
+        }
+        if (pushId == null || pushId.isEmpty()) {
+            pushId = String.valueOf(System.currentTimeMillis());
+        }
+        Log.d(TAG, "🆔 Computed pushId: " + pushId);
+
         Intent fullScreenIntent = new Intent(context, MainActivity.class);
         fullScreenIntent.putExtra("native_push_data", json.toString());
+        fullScreenIntent.putExtra("native_push_id", pushId);
         fullScreenIntent.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK |
                         Intent.FLAG_ACTIVITY_CLEAR_TOP |
@@ -170,11 +180,13 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             Log.d(TAG, "🟢 App already in foreground — skipping sound and launch");
         }
 
-        // ✅ Regardless of state, refresh WebView
+        // ✅ Refresh WebView immediately via broadcast (foreground or background)
         try {
+            Log.d(TAG, "📡 Broadcasting refresh for pushId: " + pushId);
             Intent refreshIntent = new Intent(REFRESH_ACTION);
             refreshIntent.setPackage(context.getPackageName());
             refreshIntent.putExtra("native_push_data", json.toString());
+            refreshIntent.putExtra("native_push_id", pushId);
             context.sendBroadcast(refreshIntent);
             Log.d(TAG, "🔁 Sent broadcast to refresh WebView");
         } catch (Exception e) {

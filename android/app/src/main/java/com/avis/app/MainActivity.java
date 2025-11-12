@@ -29,10 +29,13 @@ import android.webkit.WebResourceRequest;
 import android.net.Uri;
 import android.content.ActivityNotFoundException;
 
+import org.json.JSONObject;
+
+import java.util.Locale;
+
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "AVIS_MAIN";
     private WebView webView;
-    private static long lastReloadTime = 0; // Used for 5-second throttle
     public static boolean isActive = false;
     private static long lastWebViewReloadTime = 0;
     private static final long WEBVIEW_RELOAD_THROTTLE_MS = 3000; // 3 seconds
@@ -40,6 +43,18 @@ public class MainActivity extends BridgeActivity {
     private boolean isWebViewReady = false;
     private static final String REFRESH_ACTION = "com.avis.app.REFRESH_WEBVIEW";
     private boolean receiverRegistered = false; // track registration state
+    private static final Object PUSH_LOCK = new Object();
+    private static String lastProcessedPushKey = null;
+    private static String pendingPushKey = null;
+    private static String pendingPushSource = null;
+    private static boolean isAudioAlertPlaying = false;
+    private static boolean isAudioStateKnown = false;
+    private static long lastAudioStateUpdateMs = 0;
+    private static final long AUDIO_FLAG_POLL_INTERVAL_MS = 2000L;
+    private static final long AUDIO_STATE_STALE_THRESHOLD_MS = 1200L;
+    private Handler audioStateHandler;
+    private Runnable audioStateRunnable;
+    private Handler mainHandler;
 
     // Simple safe reload wrapper
     private void safeReloadWebView() {
@@ -48,20 +63,7 @@ public class MainActivity extends BridgeActivity {
                 Log.w(TAG, "safeReloadWebView: webView is null, skipping");
                 return;
             }
-            long now = System.currentTimeMillis();
-            if (now - lastWebViewReloadTime < WEBVIEW_RELOAD_THROTTLE_MS) {
-                Log.d(TAG, "safeReloadWebView: throttled, skipping");
-                return;
-            }
-            lastWebViewReloadTime = now;
-            webView.post(() -> {
-                try {
-                    webView.reload();
-                    Log.d(TAG, "safeReloadWebView: reload called");
-                } catch (Exception e) {
-                    Log.e(TAG, "safeReloadWebView: reload failed", e);
-                }
-            });
+            triggerWebViewReload("safeReloadWebView");
         } catch (Exception e) {
             Log.e(TAG, "safeReloadWebView: unexpected error", e);
         }
@@ -98,6 +100,8 @@ public class MainActivity extends BridgeActivity {
         });
 
         super.onCreate(savedInstanceState);
+
+        mainHandler = new Handler(Looper.getMainLooper());
 
         // 🔍 Print current FCM token at startup
         FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
@@ -177,11 +181,10 @@ public class MainActivity extends BridgeActivity {
 
                 injectJwtReader(webView);
                 startJwtRefreshMonitor(webView);
-                if (System.currentTimeMillis() - lastWebViewReloadTime > WEBVIEW_RELOAD_THROTTLE_MS) {
-                    handleIntentPush(getIntent());
-                } else {
-                    Log.d(TAG, "🧩 Skipped handleIntentPush due to recent reload");
-                }
+                injectAudioFlagReader(webView);
+                startAudioFlagMonitor(webView);
+                handleIntentPush(getIntent(), false);
+                processPendingPushIfNeeded();
 
             }
         });
@@ -194,28 +197,9 @@ public class MainActivity extends BridgeActivity {
 
                 Log.d(TAG, "Broadcast received: REFRESH_WEBVIEW");
 
-                // Throttle duplicates
-                long now = System.currentTimeMillis();
-                if (now - lastWebViewReloadTime < WEBVIEW_RELOAD_THROTTLE_MS) {
-                    Log.d(TAG, "Broadcast handler: skipping duplicate refresh (throttled)");
-                    return;
-                }
-
-                // If webView is ready, reload safely; otherwise defer
-                if (isWebViewReady && webView != null) {
-                    safeReloadWebView();
-                    Log.d(TAG, "Broadcast handler: immediate reload requested");
-                } else {
-                    Log.w(TAG, "Broadcast handler: WebView not ready, deferring reload");
-                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        if (isWebViewReady && webView != null) {
-                            safeReloadWebView();
-                            Log.d(TAG, "Broadcast handler: deferred reload executed");
-                        } else {
-                            Log.e(TAG, "Broadcast handler: deferred reload skipped, WebView still not ready");
-                        }
-                    }, 1500); // 1.5s delay
-                }
+                String payload = intent.getStringExtra("native_push_data");
+                String pushKey = intent.getStringExtra("native_push_id");
+                handlePushPayloadInternal(pushKey, payload, "broadcast", true);
             }
         };
 
@@ -248,7 +232,7 @@ public class MainActivity extends BridgeActivity {
             // If webview ready, handle immediately under try/catch
             if (isWebViewReady && webView != null) {
                 try {
-                    handleIntentPush(intent);
+                    handleIntentPush(intent, false);
                     Log.d(TAG, "onNewIntent: handleIntentPush executed immediately");
                 } catch (Exception e) {
                     Log.e(TAG, "onNewIntent: handleIntentPush failed", e);
@@ -259,7 +243,7 @@ public class MainActivity extends BridgeActivity {
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     try {
                         if (isWebViewReady && webView != null) {
-                            handleIntentPush(getIntent());
+                            handleIntentPush(getIntent(), false);
                             Log.d(TAG, "onNewIntent: deferred handleIntentPush executed");
                         } else {
                             Log.e(TAG, "onNewIntent: WebView not ready at deferred time; skipping");
@@ -296,7 +280,9 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "❌ Error stopping sound on resume", e);
         }
 
-        handleIntentPush(getIntent());
+        injectAudioFlagReader(webView);
+        handleIntentPush(getIntent(), false);
+        processPendingPushIfNeeded();
     }
 
     @Override
@@ -322,34 +308,248 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             Log.w(TAG, "Receiver already unregistered or null", e);
         }
+
+        if (audioStateHandler != null && audioStateRunnable != null) {
+            audioStateHandler.removeCallbacks(audioStateRunnable);
+        }
     }
 
     /**
      * Handles reload when an FCM push is received.
      * Prevents multiple reloads within 5 seconds.
      */
-    private void handleIntentPush(Intent intent) {
+    private void handleIntentPush(Intent intent, boolean allowImmediateReload) {
         if (intent == null) return;
 
         String dataJson = intent.getStringExtra("native_push_data");
-        if (dataJson == null) return;
+        String pushKey = intent.getStringExtra("native_push_id");
+        handlePushPayloadInternal(pushKey, dataJson, "intent", allowImmediateReload);
+    }
 
-        long now = System.currentTimeMillis();
-        if (now - lastReloadTime < 5000) {
-            Log.d(TAG, "⏱ Skipping reload (throttled within 5s)");
+    private void triggerWebViewReload(String source) {
+        if (webView == null) {
+            Log.w(TAG, "triggerWebViewReload: webView is null");
             return;
         }
-        lastReloadTime = now;
-
-        Log.d(TAG, "🔁 Refreshing WebView after FCM push: " + dataJson);
-
+        lastWebViewReloadTime = System.currentTimeMillis();
         webView.post(() -> {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                webView.evaluateJavascript("location.reload()", (ValueCallback<String>) value -> Log.d(TAG, "✅ WebView reloaded successfully"));
-            } else {
-                webView.loadUrl("javascript:location.reload()");
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    webView.evaluateJavascript("location.reload()", (ValueCallback<String>) value -> Log.d(TAG, "✅ WebView reloaded via " + source));
+                } else {
+                    webView.loadUrl("javascript:location.reload()");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "triggerWebViewReload: reload failed (" + source + ")", e);
             }
         });
+    }
+
+    private void handlePushPayloadInternal(String pushKey, String payload, String source, boolean allowImmediateReload) {
+        String normalizedKey = (pushKey != null && !pushKey.trim().isEmpty())
+                ? pushKey.trim()
+                : payload != null ? payload.trim() : null;
+
+        if (normalizedKey == null || normalizedKey.isEmpty()) {
+            Log.d(TAG, "handlePushPayloadInternal: no key or payload provided (" + source + ")");
+            return;
+        }
+
+        Log.d(TAG, "handlePushPayloadInternal: key=" + normalizedKey + ", source=" + source + ", allowImmediate=" + allowImmediateReload);
+
+        boolean audioStateFresh;
+        synchronized (PUSH_LOCK) {
+            audioStateFresh = isAudioStateKnown && (System.currentTimeMillis() - lastAudioStateUpdateMs) <= AUDIO_STATE_STALE_THRESHOLD_MS;
+        }
+
+        if (!audioStateFresh) {
+            Log.d(TAG, "handlePushPayloadInternal: audio state stale, requesting refresh");
+            synchronized (PUSH_LOCK) {
+                pendingPushKey = normalizedKey;
+                pendingPushSource = source;
+            }
+            if (webView != null) {
+                injectAudioFlagReader(webView);
+            }
+            Handler handler = mainHandler != null ? mainHandler : new Handler(Looper.getMainLooper());
+            handler.postDelayed(this::processPendingPushIfNeeded, 400);
+            return;
+        }
+
+        boolean shouldReloadNow;
+        boolean canReloadNow = allowImmediateReload && isWebViewReady && webView != null;
+        synchronized (PUSH_LOCK) {
+            if (normalizedKey.equals(lastProcessedPushKey)) {
+                Log.d(TAG, "handlePushPayloadInternal: payload already processed (" + source + "), lastProcessed=" + lastProcessedPushKey);
+                return;
+            }
+
+            if (isAudioAlertPlaying) {
+                pendingPushKey = normalizedKey;
+                pendingPushSource = source;
+                Log.d(TAG, "handlePushPayloadInternal: audio alert playing, queuing key=" + normalizedKey);
+                return;
+            }
+
+            if (canReloadNow) {
+                lastProcessedPushKey = normalizedKey;
+                pendingPushKey = null;
+                pendingPushSource = null;
+                Log.d(TAG, "handlePushPayloadInternal: will reload immediately for key=" + normalizedKey);
+                shouldReloadNow = true;
+            } else {
+                pendingPushKey = normalizedKey;
+                pendingPushSource = source;
+                Log.d(TAG, "handlePushPayloadInternal: deferring reload, pendingKey=" + pendingPushKey);
+                shouldReloadNow = false;
+            }
+        }
+
+        if (shouldReloadNow) {
+            Log.d(TAG, "handlePushPayloadInternal: triggering reload (" + source + ")");
+            triggerWebViewReload(source);
+        } else if (allowImmediateReload) {
+            Log.w(TAG, "handlePushPayloadInternal: WebView not ready, deferring (" + source + ")");
+            new Handler(Looper.getMainLooper()).postDelayed(this::processPendingPushIfNeeded, 1500);
+        } else {
+            Log.w(TAG, "handlePushPayloadInternal: deferring until activity active (" + source + ")");
+        }
+    }
+
+    private void processPendingPushIfNeeded() {
+        String keyToProcess = null;
+        String sourceToUse = null;
+        boolean retryNeeded = false;
+        boolean audioPlaying;
+        boolean webReady;
+        boolean audioStateFresh;
+
+        synchronized (PUSH_LOCK) {
+            if (pendingPushKey == null) {
+                Log.d(TAG, "processPendingPushIfNeeded: no pending key");
+                return;
+            }
+
+            long now = System.currentTimeMillis();
+            audioStateFresh = isAudioStateKnown && (now - lastAudioStateUpdateMs) <= AUDIO_STATE_STALE_THRESHOLD_MS;
+            audioPlaying = isAudioAlertPlaying;
+            webReady = isWebViewReady && webView != null;
+
+            if (!audioStateFresh || audioPlaying || !webReady) {
+                retryNeeded = true;
+            } else if (pendingPushKey.equals(lastProcessedPushKey)) {
+                pendingPushKey = null;
+                pendingPushSource = null;
+            } else {
+                keyToProcess = pendingPushKey;
+                sourceToUse = pendingPushSource != null ? pendingPushSource : "pending";
+                pendingPushKey = null;
+                pendingPushSource = null;
+                lastProcessedPushKey = keyToProcess;
+            }
+        }
+
+        if (retryNeeded) {
+            Log.d(TAG, "processPendingPushIfNeeded: deferring reload (audioFresh=" + audioStateFresh + ", audioPlaying=" + isAudioAlertPlaying + ", webViewReady=" + (isWebViewReady && webView != null) + ")");
+            Handler handler = mainHandler != null ? mainHandler : new Handler(Looper.getMainLooper());
+            handler.postDelayed(this::processPendingPushIfNeeded, 500);
+            if (!audioStateFresh && webView != null) {
+                injectAudioFlagReader(webView);
+            }
+            return;
+        }
+
+        if (keyToProcess == null) {
+            Log.d(TAG, "processPendingPushIfNeeded: nothing to process after checks");
+            return;
+        }
+
+        Log.d(TAG, "processPendingPushIfNeeded: executing deferred reload for key=" + keyToProcess + " from " + sourceToUse);
+        triggerWebViewReload(sourceToUse != null ? sourceToUse : "pending");
+    }
+
+    private void injectAudioFlagReader(WebView targetWebView) {
+        if (targetWebView == null) {
+            Log.w(TAG, "injectAudioFlagReader: webView is null");
+            return;
+        }
+        Handler handler = mainHandler != null ? mainHandler : new Handler(Looper.getMainLooper());
+        handler.post(() -> {
+            try {
+                final String script = "(() => { try { const raw = localStorage.getItem('isAudioAlertPlaying'); const value = raw === null ? 'false' : String(raw); if (window.AndroidBridge && window.AndroidBridge.receiveAudioState) { window.AndroidBridge.receiveAudioState(value); } } catch (e) { console.error('Audio flag read error', e); } })();";
+                targetWebView.evaluateJavascript(script, null);
+            } catch (Exception e) {
+                Log.e(TAG, "injectAudioFlagReader: execution failed", e);
+            }
+        });
+    }
+
+    private void startAudioFlagMonitor(WebView targetWebView) {
+        if (targetWebView == null) {
+            Log.w(TAG, "startAudioFlagMonitor: webView is null");
+            return;
+        }
+
+        if (audioStateHandler == null) {
+            audioStateHandler = new Handler(Looper.getMainLooper());
+        }
+        if (audioStateRunnable != null) {
+            audioStateHandler.removeCallbacks(audioStateRunnable);
+        }
+
+        audioStateRunnable = new Runnable() {
+            @Override
+            public void run() {
+                injectAudioFlagReader(targetWebView);
+                if (audioStateHandler != null) {
+                    audioStateHandler.postDelayed(this, AUDIO_FLAG_POLL_INTERVAL_MS);
+                }
+            }
+        };
+        audioStateHandler.postDelayed(audioStateRunnable, AUDIO_FLAG_POLL_INTERVAL_MS);
+    }
+
+    private void handleAudioStateFromJs(String rawValue) {
+        boolean isPlaying = parseAudioFlagValue(rawValue);
+        boolean changed;
+        long now = System.currentTimeMillis();
+        synchronized (PUSH_LOCK) {
+            isAudioStateKnown = true;
+            lastAudioStateUpdateMs = now;
+            changed = isAudioAlertPlaying != isPlaying;
+            isAudioAlertPlaying = isPlaying;
+        }
+        Log.d(TAG, "handleAudioStateFromJs: isPlaying=" + isPlaying + ", changed=" + changed);
+        processPendingPushIfNeeded();
+    }
+
+    private boolean parseAudioFlagValue(String rawValue) {
+        if (rawValue == null) {
+            return false;
+        }
+        String trimmed = rawValue.trim();
+        if (trimmed.isEmpty()) {
+            return false;
+        }
+        String lower = trimmed.toLowerCase(Locale.US);
+        if ("true".equals(lower) || "1".equals(lower) || "yes".equals(lower)) {
+            return true;
+        }
+        if ("false".equals(lower) || "0".equals(lower) || "no".equals(lower)) {
+            return false;
+        }
+        try {
+            JSONObject object = new JSONObject(trimmed);
+            if (object.has("isPlaying")) {
+                return object.optBoolean("isPlaying", false);
+            }
+            if (object.has("value")) {
+                return object.optBoolean("value", false);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "parseAudioFlagValue: unable to parse JSON value=" + rawValue, e);
+        }
+        return Boolean.parseBoolean(lower);
     }
 
     /**
@@ -388,6 +588,12 @@ public class MainActivity extends BridgeActivity {
 
             // Immediately sync FCM token + JWT to backend
             MyFirebaseMessagingService.syncTokenToBackendStatic(getApplicationContext(), jwt);
+        }
+
+        @android.webkit.JavascriptInterface
+        public void receiveAudioState(String state) {
+            Log.d(TAG, "🎵 Audio state received from WebView: " + state);
+            handleAudioStateFromJs(state);
         }
     }
 }
