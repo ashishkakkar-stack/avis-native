@@ -385,9 +385,10 @@ public class MainActivity extends BridgeActivity {
             }
 
             if (isAudioAlertPlaying) {
-                pendingPushKey = normalizedKey;
-                pendingPushSource = source;
-                Log.d(TAG, "handlePushPayloadInternal: audio alert playing, queuing key=" + normalizedKey);
+                pendingPushKey = null;
+                pendingPushSource = null;
+                lastProcessedPushKey = normalizedKey;
+                Log.d(TAG, "handlePushPayloadInternal: audio alert playing, skipping reload for key=" + normalizedKey);
                 return;
             }
 
@@ -435,7 +436,14 @@ public class MainActivity extends BridgeActivity {
             audioPlaying = isAudioAlertPlaying;
             webReady = isWebViewReady && webView != null;
 
-            if (!audioStateFresh || audioPlaying || !webReady) {
+            if (audioPlaying) {
+                Log.d(TAG, "processPendingPushIfNeeded: audio playing, clearing pending refresh");
+                pendingPushKey = null;
+                pendingPushSource = null;
+                return;
+            }
+
+            if (!audioStateFresh || !webReady) {
                 retryNeeded = true;
             } else if (pendingPushKey.equals(lastProcessedPushKey)) {
                 pendingPushKey = null;
@@ -450,7 +458,7 @@ public class MainActivity extends BridgeActivity {
         }
 
         if (retryNeeded) {
-            Log.d(TAG, "processPendingPushIfNeeded: deferring reload (audioFresh=" + audioStateFresh + ", audioPlaying=" + isAudioAlertPlaying + ", webViewReady=" + (isWebViewReady && webView != null) + ")");
+            Log.d(TAG, "processPendingPushIfNeeded: deferring reload (audioFresh=" + audioStateFresh + ", webViewReady=" + (isWebViewReady && webView != null) + ")");
             Handler handler = mainHandler != null ? mainHandler : new Handler(Looper.getMainLooper());
             handler.postDelayed(this::processPendingPushIfNeeded, 500);
             if (!audioStateFresh && webView != null) {
