@@ -12,3 +12,8 @@ dist/
 .DS_Store
 *.log
 tmp/
+
+# Keystore files (sensitive - do not commit)
+android/keystore.properties
+android/app/*.jks
+android/app/*.keystore

@@ -33,6 +33,12 @@ import org.json.JSONObject;
 
 import java.util.Locale;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.provider.Settings;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "AVIS_MAIN";
     private WebView webView;
@@ -55,6 +61,10 @@ public class MainActivity extends BridgeActivity {
     private Handler audioStateHandler;
     private Runnable audioStateRunnable;
     private Handler mainHandler;
+    
+    // Permission request codes
+    private static final int PERMISSION_REQUEST_NOTIFICATION = 1001;
+    private static final int PERMISSION_REQUEST_OVERLAY = 1002;
 
     // Simple safe reload wrapper
     private void safeReloadWebView() {
@@ -102,6 +112,9 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         mainHandler = new Handler(Looper.getMainLooper());
+
+        // Request permissions automatically on app launch
+        requestPermissionsOnLaunch();
 
         // 🔍 Print current FCM token at startup
         FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
@@ -583,6 +596,64 @@ public class MainActivity extends BridgeActivity {
             }
         };
         handler.postDelayed(checkJwtTask, 15 * 60 * 1000);
+    }
+
+    /**
+     * Request permissions automatically when app launches
+     */
+    private void requestPermissionsOnLaunch() {
+        // Request notification permission (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Requesting notification permission");
+                ActivityCompat.requestPermissions(this, 
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS}, 
+                    PERMISSION_REQUEST_NOTIFICATION);
+            } else {
+                Log.d(TAG, "Notification permission already granted");
+            }
+        }
+
+        // Request overlay permission (Display over other apps)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                Log.d(TAG, "Requesting overlay permission");
+                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+                startActivityForResult(intent, PERMISSION_REQUEST_OVERLAY);
+            } else {
+                Log.d(TAG, "Overlay permission already granted");
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        
+        if (requestCode == PERMISSION_REQUEST_NOTIFICATION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "✅ Notification permission granted");
+            } else {
+                Log.w(TAG, "⚠️ Notification permission denied");
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (requestCode == PERMISSION_REQUEST_OVERLAY) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (Settings.canDrawOverlays(this)) {
+                    Log.d(TAG, "✅ Overlay permission granted");
+                } else {
+                    Log.w(TAG, "⚠️ Overlay permission denied");
+                }
+            }
+        }
     }
 
     /**
