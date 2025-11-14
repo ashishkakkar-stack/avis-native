@@ -17,3 +17,9 @@ tmp/
 android/keystore.properties
 android/app/*.jks
 android/app/*.keystore
+
+# APK files (build artifacts - do not commit)
+*.apk
+*.apks
+*.aab
+avis-app-v*.apk
