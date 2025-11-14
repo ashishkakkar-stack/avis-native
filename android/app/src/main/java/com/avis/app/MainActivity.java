@@ -7,6 +7,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
 import android.webkit.ValueCallback;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -15,6 +19,7 @@ import com.getcapacitor.BridgeActivity;
 import com.google.firebase.messaging.FirebaseMessaging;
 
 import androidx.annotation.Nullable;
+import androidx.core.splashscreen.SplashScreen;
 import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
@@ -55,6 +60,9 @@ public class MainActivity extends BridgeActivity {
     private Handler audioStateHandler;
     private Runnable audioStateRunnable;
     private Handler mainHandler;
+    private View splashOverlay;
+    private boolean splashOverlayRemoved = false;
+    private boolean splashOverlayAttached = false;
 
     // Simple safe reload wrapper
     private void safeReloadWebView() {
@@ -95,6 +103,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
 
+        SplashScreen splashScreen = SplashScreen.installSplashScreen(this);
+
         Thread.setDefaultUncaughtExceptionHandler((thread, ex) -> {
             Log.e(TAG, "Uncaught exception in thread " + thread.getName(), ex);
         });
@@ -102,6 +112,11 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         mainHandler = new Handler(Looper.getMainLooper());
+
+        setupSplashOverlay();
+        if (splashScreen != null) {
+            splashScreen.setKeepOnScreenCondition(() -> !splashOverlayAttached);
+        }
 
         // 🔍 Print current FCM token at startup
         FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
@@ -185,6 +200,7 @@ public class MainActivity extends BridgeActivity {
                 startAudioFlagMonitor(webView);
                 handleIntentPush(getIntent(), false);
                 processPendingPushIfNeeded();
+                removeSplashOverlay();
 
             }
         });
@@ -515,6 +531,66 @@ public class MainActivity extends BridgeActivity {
             }
         };
         audioStateHandler.postDelayed(audioStateRunnable, AUDIO_FLAG_POLL_INTERVAL_MS);
+    }
+
+    private void setupSplashOverlay() {
+        ViewGroup root = findViewById(android.R.id.content);
+        if (root == null) {
+            Log.w(TAG, "setupSplashOverlay: root view is null");
+            return;
+        }
+        splashOverlayRemoved = false;
+        if (splashOverlay != null) {
+            root.removeView(splashOverlay);
+        }
+        splashOverlay = getLayoutInflater().inflate(R.layout.native_splash, root, false);
+        ViewGroup.LayoutParams params = new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        );
+        root.addView(splashOverlay, params);
+        splashOverlayAttached = true;
+        if (mainHandler != null) {
+            mainHandler.postDelayed(() -> {
+                if (!splashOverlayRemoved) {
+                    Log.w(TAG, "removeSplashOverlay: timeout fallback");
+                    removeSplashOverlay();
+                }
+            }, 6000);
+        }
+    }
+
+    private void removeSplashOverlay() {
+        if (splashOverlayRemoved) {
+            return;
+        }
+        splashOverlayRemoved = true;
+        splashOverlayAttached = false;
+        if (splashOverlay == null) {
+            return;
+        }
+        AlphaAnimation fadeOut = new AlphaAnimation(1f, 0f);
+        fadeOut.setDuration(250);
+        fadeOut.setFillAfter(true);
+        fadeOut.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                ViewGroup root = findViewById(android.R.id.content);
+                if (root != null && splashOverlay != null) {
+                    root.removeView(splashOverlay);
+                }
+                splashOverlay = null;
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+            }
+        });
+        splashOverlay.startAnimation(fadeOut);
     }
 
     private void handleAudioStateFromJs(String rawValue) {
