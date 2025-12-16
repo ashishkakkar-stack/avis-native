@@ -9,4 +9,22 @@
     <WebView
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- Custom Loading Screen -->
+    <FrameLayout
+        android:id="@+id/loadingView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/splash_background"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageView
+            android:id="@+id/loadingImage"
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:layout_gravity="center"
+            android:src="@mipmap/ic_launcher_foreground"
+            android:contentDescription="App Logo" />
+    </FrameLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

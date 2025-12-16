@@ -10,6 +10,11 @@ import android.util.Log;
 import android.webkit.ValueCallback;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.animation.Animator;
+import android.animation.AnimatorInflater;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.FrameLayout;
 
 import com.getcapacitor.BridgeActivity;
 import com.google.firebase.messaging.FirebaseMessaging;
@@ -42,6 +47,8 @@ import androidx.core.content.ContextCompat;
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "AVIS_MAIN";
     private WebView webView;
+    private View loadingView;
+    private ImageView loadingImage;
     public static boolean isActive = false;
     private static long lastWebViewReloadTime = 0;
     private static final long WEBVIEW_RELOAD_THROTTLE_MS = 3000; // 3 seconds
@@ -130,6 +137,24 @@ public class MainActivity extends BridgeActivity {
 
         // Initialize WebView and JS bridge
         webView = (WebView) bridge.getWebView();
+
+        // Initialize Loading Screen (Inflate and add programmatically)
+        View loadingScreen = getLayoutInflater().inflate(R.layout.loading_layout, null);
+        addContentView(loadingScreen, new android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+
+        loadingView = loadingScreen.findViewById(R.id.loadingView);
+        loadingImage = loadingScreen.findViewById(R.id.loadingImage);
+
+        // Start Pulse Animation
+        try {
+            Animator pulseAnimator = AnimatorInflater.loadAnimator(this, R.animator.logo_pulse_animator);
+            pulseAnimator.setTarget(loadingImage);
+            pulseAnimator.start();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start loading animation", e);
+        }
         webView.getSettings().setJavaScriptEnabled(true);
         webView.addJavascriptInterface(new JsBridge(), "AndroidBridge");
 
@@ -198,6 +223,9 @@ public class MainActivity extends BridgeActivity {
                 startAudioFlagMonitor(webView);
                 handleIntentPush(getIntent(), false);
                 processPendingPushIfNeeded();
+                
+                // Hide loading screen when page is ready
+                hideLoadingScreen();
 
             }
         });
@@ -673,6 +701,15 @@ public class MainActivity extends BridgeActivity {
         public void receiveAudioState(String state) {
             Log.d(TAG, "🎵 Audio state received from WebView: " + state);
             handleAudioStateFromJs(state);
+        }
+    }
+    private void hideLoadingScreen() {
+        if (loadingView != null && loadingView.getVisibility() == View.VISIBLE) {
+            loadingView.animate()
+                .alpha(0f)
+                .setDuration(500)
+                .withEndAction(() -> loadingView.setVisibility(View.GONE))
+                .start();
         }
     }
 }
