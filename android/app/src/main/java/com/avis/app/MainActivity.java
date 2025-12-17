@@ -2,6 +2,9 @@ package com.avis.app;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.app.NotificationManager;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -71,7 +74,9 @@ public class MainActivity extends BridgeActivity {
     
     // Permission request codes
     private static final int PERMISSION_REQUEST_NOTIFICATION = 1001;
+
     private static final int PERMISSION_REQUEST_OVERLAY = 1002;
+    private static final int PERMISSION_REQUEST_FULL_SCREEN_INTENT = 1003;
 
     // Simple safe reload wrapper
     private void safeReloadWebView() {
@@ -652,6 +657,31 @@ public class MainActivity extends BridgeActivity {
                 startActivityForResult(intent, PERMISSION_REQUEST_OVERLAY);
             } else {
                 Log.d(TAG, "Overlay permission already granted");
+            }
+
+        }
+
+        // Request Full Screen Intent permission (Android 14+)
+        if (Build.VERSION.SDK_INT >= 34) {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (!nm.canUseFullScreenIntent()) {
+                Log.d(TAG, "Requesting Full Screen Intent permission");
+                new AlertDialog.Builder(this)
+                        .setTitle("Permission Required")
+                        .setMessage("To receive critical alerts when the app is closed, please allow 'Full Screen Intent' permission.")
+                        .setPositiveButton("Open Settings", (dialog, which) -> {
+                            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT);
+                            try {
+                                intent.setData(Uri.parse("package:" + getPackageName()));
+                                startActivity(intent);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to open Safe Settings", e);
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            } else {
+                Log.d(TAG, "Full Screen Intent permission already granted");
             }
         }
     }

@@ -33,11 +33,14 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {
-        Log.d(TAG, "📨 FCM message received!");
+        Log.d(TAG, "📨 FCM message received at " + System.currentTimeMillis());
 
         if (remoteMessage.getFrom() != null) {
             Log.d(TAG, "Message received from: " + remoteMessage.getFrom());
         }
+        
+        int priority = remoteMessage.getPriority();
+        Log.d(TAG, "📶 FCM Message Priority: " + (priority == RemoteMessage.PRIORITY_HIGH ? "High" : "Normal/Unknown (" + priority + ")"));
 
         // Log notification content (if any)
         if (remoteMessage.getNotification() != null) {
@@ -93,6 +96,18 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         Context context = getApplicationContext();
         NotificationManager notificationManager =
                 (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        
+        if (Build.VERSION.SDK_INT >= 34) {
+             boolean canUse = notificationManager.canUseFullScreenIntent();
+             Log.d(TAG, "🔍 canUseFullScreenIntent: " + canUse);
+        }
+
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
+        boolean isPowerSave = pm != null && pm.isPowerSaveMode();
+        Log.d(TAG, "🔋 isPowerSaveMode: " + isPowerSave);
+
+        boolean canDrawOverlays = android.provider.Settings.canDrawOverlays(context);
+        Log.d(TAG, "🖼️ canDrawOverlays: " + canDrawOverlays);
 
         String channelId = "avis_notifications";
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -124,7 +139,9 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
         fullScreenIntent.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK |
                         Intent.FLAG_ACTIVITY_CLEAR_TOP |
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP |
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT |
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK
         );
 
         PendingIntent fullScreenPendingIntent = PendingIntent.getActivity(
@@ -162,10 +179,35 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
             // Prevent duplicate launches — only start if activity really isn't running
             if (!MainActivity.isActive()) {
+                final String finalPushId = pushId;
+                final String finalJsonData = json.toString();
+                final Intent finalFullScreenIntent = fullScreenIntent;
+
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     try {
-                        context.startActivity(fullScreenIntent);
-                        Log.d(TAG, "✅ App brought to foreground after delay");
+                        // 1. Android 14+ (SDK 34): Use PendingIntent with Background Activity Start Mode
+                        // This is the ONLY way to interrupt the user or start from background on newer Androids.
+                        if (Build.VERSION.SDK_INT >= 34) {
+                            android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+                            options.setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+                            
+                            PendingIntent fallbackPendingIntent = PendingIntent.getActivity(
+                                    context,
+                                    1001, // Different request code for fallback
+                                    finalFullScreenIntent,
+                                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE
+                            );
+                            
+                            PendingIntent.OnFinished onFinished = (pendingIntent, intent, resultCode, resultData, resultExtras) -> 
+                                Log.d(TAG, "📤 PendingIntent.send finished with resultCode: " + resultCode);
+
+                            fallbackPendingIntent.send(context, 0, null, onFinished, null, null, options.toBundle());
+                            Log.d(TAG, "✅ App brought to foreground using PendingIntent.send() (SDK 34+)");
+                        } else {
+                            // 2. Older Androids: Direct StartActivity works fine
+                            context.startActivity(finalFullScreenIntent);
+                            Log.d(TAG, "✅ App brought to foreground using startActivity");
+                        }
                         playCustomSound();
                     } catch (Exception e) {
                         Log.e(TAG, "❌ Failed to auto-launch MainActivity", e);
