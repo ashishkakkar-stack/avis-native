@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">AVIS</string>
     <string name="title_activity_main">AVIS</string>
-    <string name="package_name">com.avis.app</string>
-    <string name="custom_url_scheme">com.avis.app</string>
+    <string name="package_name">com.avis.srs.app</string>
+    <string name="custom_url_scheme">com.avis.srs.app</string>
 </resources>

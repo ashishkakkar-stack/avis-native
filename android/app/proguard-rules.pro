@@ -15,12 +15,12 @@
 }
 
 # Keep JsBridge class and all its methods (used for WebView JavaScript interface)
--keep class com.avis.app.MainActivity$JsBridge {
+-keep class com.avis.srs.app.MainActivity$JsBridge {
     *;
 }
 
 # Keep all classes in the app package (to be safe)
--keep class com.avis.app.** { *; }
+-keep class com.avis.srs.app.** { *; }
 
 # Keep Capacitor classes
 -keep class com.getcapacitor.** { *; }

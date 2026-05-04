@@ -1,4 +1,4 @@
-package com.avis.app;
+package com.avis.srs.app;
 
 import android.app.ActivityManager;
 import android.app.Notification;
@@ -29,7 +29,7 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
     private static final String TAG = "AVIS_FCM";
     private static MediaPlayer mediaPlayer;
     private static long lastSoundTime = 0; // Throttle audio replay
-    private static final String REFRESH_ACTION = "com.avis.app.REFRESH_WEBVIEW";
+    private static final String REFRESH_ACTION = "com.avis.srs.app.REFRESH_WEBVIEW";
 
     @Override
     public void onMessageReceived(RemoteMessage remoteMessage) {

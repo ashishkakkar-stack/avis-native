@@ -1,4 +1,4 @@
-package com.avis.app;
+package com.avis.srs.app;
 
 import android.app.Activity;
 import android.media.MediaPlayer;

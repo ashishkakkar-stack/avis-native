@@ -1,4 +1,4 @@
-package com.avis.app;
+package com.avis.srs.app;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
@@ -57,7 +57,7 @@ public class MainActivity extends BridgeActivity {
     private static final long WEBVIEW_RELOAD_THROTTLE_MS = 3000; // 3 seconds
     private BroadcastReceiver webViewRefreshReceiver;
     private boolean isWebViewReady = false;
-    private static final String REFRESH_ACTION = "com.avis.app.REFRESH_WEBVIEW";
+    private static final String REFRESH_ACTION = "com.avis.srs.app.REFRESH_WEBVIEW";
     private boolean receiverRegistered = false; // track registration state
     private static final Object PUSH_LOCK = new Object();
     private static String lastProcessedPushKey = null;
@@ -320,7 +320,7 @@ public class MainActivity extends BridgeActivity {
 
         // ✅ Stop any ringing tone when app comes to foreground
         try {
-            com.avis.app.MyFirebaseMessagingService.stopSound();
+            com.avis.srs.app.MyFirebaseMessagingService.stopSound();
             Log.d(TAG, "🔇 Sound stopped on app foreground");
         } catch (Exception e) {
             Log.e(TAG, "❌ Error stopping sound on resume", e);

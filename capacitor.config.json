@@ -1,5 +1,5 @@
 {
-  "appId": "com.avis.app",
+  "appId": "com.avis.srs.app",
   "appName": "AVIS",
   "webDir": "public",
   "server": {
